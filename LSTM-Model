@@ -1,0 +1,222 @@
+import numpy as np
+from sklearn.pipeline import make_pipeline
+import torch
+import torch.nn as nn
+from sklearn.preprocessing import PolynomialFeatures, RobustScaler, StandardScaler
+from sklearn.linear_model import Ridge, Lasso, ElasticNet
+from sklearn.decomposition import PCA
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from scipy.signal import find_peaks
+import matplotlib.pyplot as plt
+from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
+from sklearn.model_selection import train_test_split
+
+# Simulera neutron-spridningsdata med realistiskt brus
+np.random.seed(0)
+angles = np.linspace(0, 180, 100)
+intensity = np.sin(np.radians(angles)) + 0.05 * np.random.normal(size=angles.size)
+
+# Visualisera den simulerade datan
+plt.plot(angles, intensity, label="Simulerad Intensitet")
+plt.xlabel("Vinkel (grader)")
+plt.ylabel("Intensitet")
+plt.title("Simulerad Neutron-Spridningsdata")
+plt.legend()
+plt.show()
+
+# Identifiera toppar med justerade parametrar
+peaks, properties = find_peaks(intensity, height=0.01, prominence=0.01, distance=5)
+
+# Toppens egenskaper: position (vinkel), höjd (intensitet), bredd (FWHM)
+peak_positions = angles[peaks]  # Vinklar för varje topp
+peak_heights = intensity[peaks]  # Intensiteter för varje topp
+peak_prominences = properties['prominences']  # Toppens tydlighet (prominence)
+peak_widths = properties.get('widths', np.zeros_like(peaks))  # Bredden på varje topp (FWHM), om tillgänglig
+
+# Visualisera identifierade toppar
+plt.plot(angles, intensity, label="Simulerad Intensitet")
+plt.plot(peak_positions, peak_heights, "x", label="Identifierade Toppar")
+plt.xlabel("Vinkel (grader)")
+plt.ylabel("Intensitet")
+plt.title("Identifierade Intensitetstoppar i Neutron-Spridningsdata")
+plt.legend()
+plt.show()
+
+# Logga toppens egenskaper för analys
+print("Toppens Positioner (Vinklar):", peak_positions)
+print("Toppens Intensiteter:", peak_heights)
+print("Toppens Prominence (Tydlighet):", peak_prominences)
+print("Toppens Bredd (FWHM):", peak_widths)
+
+# Förbättrad polynomiell regression med Ridge regularisering och optimerad grad
+degree_range = [1, 2, 3, 4, 5]
+best_poly_degree = None
+best_r2 = -np.inf
+
+# Standardisering av data
+scaler = StandardScaler()
+angles_scaled = scaler.fit_transform(angles.reshape(-1, 1))
+
+# PCA för att minska dimensionalitet (även om vi har en funktion, så kan PCA ge oss en bra inblick)
+pca = PCA(n_components=1)
+angles_pca = pca.fit_transform(angles_scaled)
+
+# Visualisera den första huvudkomponenten efter PCA
+plt.plot(angles, angles_pca, label="PCA Första Huvudkomponent")
+plt.xlabel("Vinkel (grader)")
+plt.ylabel("PCA Komponent")
+plt.title("PCA: Första Huvudkomponent")
+plt.legend()
+plt.show()
+
+# Optimera polynomgrad med RandomizedSearchCV för snabbare sökning
+for degree in degree_range:
+    poly = PolynomialFeatures(degree=degree)
+    angles_poly = poly.fit_transform(angles_scaled)
+
+    # Använd ElasticNet istället för Ridge för bättre regularisering
+    model = make_pipeline(RobustScaler(), ElasticNet(max_iter=10000))
+    param_grid = {
+        'elasticnet__alpha': np.logspace(-3, 3, 7),
+        'elasticnet__l1_ratio': [0.1, 0.5, 0.9, 1.0]  # Blanda Ridge och Lasso
+    }
+    grid_search = RandomizedSearchCV(model, param_grid, cv=5, scoring='neg_mean_squared_error', n_iter=20, random_state=42)
+    grid_search.fit(angles_poly, intensity)
+
+    intensity_pred = grid_search.best_estimator_.predict(angles_poly)
+    r2 = r2_score(intensity, intensity_pred)
+    
+    if r2 > best_r2:
+        best_r2 = r2
+        best_poly_degree = degree
+
+# Bästa grad för polynom
+print(f"Bästa polynomgrad: {best_poly_degree}")
+
+# Ridge-regression med bästa grad och ElasticNet
+poly = PolynomialFeatures(degree=best_poly_degree)
+angles_poly = poly.fit_transform(angles_scaled)
+
+# PCA på data innan regression
+angles_poly_pca = pca.fit_transform(angles_poly)
+
+# Grid search med ElasticNet
+model = make_pipeline(RobustScaler(), ElasticNet(max_iter=10000))
+param_grid = {
+    'elasticnet__alpha': np.logspace(-3, 3, 7),
+    'elasticnet__l1_ratio': [0.1, 0.5, 0.9, 1.0]
+}
+grid_search = RandomizedSearchCV(model, param_grid, cv=5, scoring='neg_mean_squared_error', n_iter=20, random_state=42)
+grid_search.fit(angles_poly_pca, intensity)
+
+# Hämta det bästa alpha och l1_ratio
+best_alpha = grid_search.best_params_['elasticnet__alpha']
+best_l1_ratio = grid_search.best_params_['elasticnet__l1_ratio']
+print(f"Bästa alpha: {best_alpha}, bästa l1_ratio: {best_l1_ratio}")
+
+# Använd den bästa modellen för att göra förutsägelser
+intensity_pred = grid_search.best_estimator_.predict(angles_poly_pca)
+
+# Visualisera resultat av polynomiell regression
+plt.plot(angles, intensity, label="Original Intensitet")
+plt.plot(angles, intensity_pred, label="Förutsagd Intensitet (ElasticNet efter PCA)")
+plt.xlabel("Vinkel (grader)")
+plt.ylabel("Intensitet")
+plt.title("ElasticNet Regression efter PCA på Neutron-Spridningsdata")
+plt.legend()
+plt.show()
+
+# Förbättrad LSTM-modell för peak-detektion och förutsägelse med batch normalization och dropout
+class LSTMModel(nn.Module):
+    def __init__(self, input_size=1, hidden_layer_size=50, output_size=1, num_layers=2, dropout_rate=0.2):
+        super(LSTMModel, self).__init__()
+        self.hidden_layer_size = hidden_layer_size
+        self.lstm = nn.LSTM(input_size, hidden_layer_size, num_layers=num_layers, dropout=dropout_rate, batch_first=True)
+        self.batch_norm = nn.BatchNorm1d(hidden_layer_size)
+        self.linear = nn.Linear(hidden_layer_size, output_size)
+        self.hidden_cell = (torch.zeros(num_layers, 1, self.hidden_layer_size), 
+                             torch.zeros(num_layers, 1, self.hidden_layer_size))
+
+    def forward(self, input_seq):
+        lstm_out, self.hidden_cell = self.lstm(input_seq, self.hidden_cell)
+        lstm_out = self.batch_norm(lstm_out[:, -1, :])  # Batch normalization på sista tidssteget
+        predictions = self.linear(lstm_out)  # Endast sista tidsteget används
+        return predictions
+
+# Förbered data för LSTM
+def create_sequences(data, seq_length):
+    sequences = []
+    for i in range(len(data) - seq_length):
+        seq = data[i:i+seq_length]
+        label = data[i+seq_length]
+        sequences.append((seq, label))
+    return sequences
+
+# Förbered data
+seq_length = 10
+data = intensity.reshape(-1, 1)
+sequences = create_sequences(data, seq_length)
+
+# Dela upp data i tränings- och testuppsättningar
+train_sequences, test_sequences = train_test_split(sequences, test_size=0.2, shuffle=False)
+
+# Initiera modellen, förlustfunktion och optimerare
+model = LSTMModel()
+loss_function = nn.MSELoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+# Träna LSTM-modellen med tidig stoppning
+epochs = 100
+best_loss = float('inf')
+early_stopping_count = 0
+patience = 10
+
+for epoch in range(epochs):
+    model.train()
+    for seq, label in train_sequences:
+        optimizer.zero_grad()
+        model.hidden_cell = (torch.zeros(2, 1, model.hidden_layer_size),
+                             torch.zeros(2, 1, model.hidden_layer_size))
+
+        y_pred = model(seq)
+        single_loss = loss_function(y_pred, label)
+        single_loss.backward()
+        optimizer.step()
+
+    if single_loss.item() < best_loss:
+        best_loss = single_loss.item()
+        early_stopping_count = 0
+    else:
+        early_stopping_count += 1
+
+    if early_stopping_count >= patience:
+        print(f'Early stopping at epoch {epoch}')
+        break
+
+    if epoch % 10 == 0:
+        print(f'Epoch {epoch+1}/{epochs} - Loss: {single_loss.item()}')
+
+# Testa LSTM-modellen
+model.eval()
+test_data = [seq for seq, _ in test_sequences]
+test_labels = [label for _, label in test_sequences]
+
+test_predictions = []
+with torch.no_grad():
+    for seq in test_data:
+        test_predictions.append(model(seq).item())
+
+# Utvärdera modellen
+r2 = r2_score(test_labels, test_predictions)
+mae = mean_absolute_error(test_labels, test_predictions)
+mse = mean_squared_error(test_labels, test_predictions)
+rmse = np.sqrt(mse)
+
+print(f"LSTM Modell Utvärdering - R²: {r2:.4f}, MAE: {mae:.4f}, MSE: {mse:.4f}, RMSE: {rmse:.4f}")
+
+# Visualisera LSTM-förutsägelser
+plt.plot(test_labels, label='Sanna värden')
+plt.plot(test_predictions, label='LSTM-förutsägelser')
+plt.legend()
+plt.title('LSTM Förutsägelser vs Sanna Värden')
+plt.show()
