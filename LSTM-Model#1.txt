@@ -16,7 +16,7 @@ np.random.seed(0)
 angles = np.linspace(0, 180, 100)
 intensity = np.sin(np.radians(angles)) + 0.05 * np.random.normal(size=angles.size)
 
-# Visualisera den simulerade datan
+# Visualisera den simulerade datan.
 plt.plot(angles, intensity, label="Simulerad Intensitet")
 plt.xlabel("Vinkel (grader)")
 plt.ylabel("Intensitet")
