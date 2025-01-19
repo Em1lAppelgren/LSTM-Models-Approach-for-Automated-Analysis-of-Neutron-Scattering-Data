@@ -1,0 +1,155 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import PolynomialFeatures, StandardScaler
+from sklearn.linear_model import ElasticNet
+from sklearn.decomposition import PCA, KernelPCA
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from scipy.signal import find_peaks, savgol_filter
+from sklearn.model_selection import RandomizedSearchCV, train_test_split
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
+from sklearn.neural_network import MLPRegressor
+from sklearn.svm import SVR
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C
+import pandas as pd
+import seaborn as sns
+
+# Simulera neutron-spridningsdata med realistiskt brus och högre komplexitet
+np.random.seed(0)
+angles = np.linspace(0, 180, 200)
+intensity = np.sin(np.radians(angles)) + 0.1 * np.sin(np.radians(2*angles)) + 0.05 * np.random.normal(size=angles.size)
+
+# Lägg till brusreducering med Savitzky-Golay filter
+intensity_smoothed = savgol_filter(intensity, window_length=15, polyorder=3)
+
+# Visualisera både original och filtrerad data
+plt.figure(figsize=(12, 6))
+plt.plot(angles, intensity, label="Original Intensitet")
+plt.plot(angles, intensity_smoothed, label="Filtrerad Intensitet")
+plt.xlabel("Vinkel (grader)")
+plt.ylabel("Intensitet")
+plt.title("Simulerad Neutron-Spridningsdata med Filtering")
+plt.legend()
+plt.show()
+
+# Identifiera toppar med justerade parametrar för bättre detektion på filtrerad data
+peaks, properties = find_peaks(intensity_smoothed, height=0.005, prominence=0.005, distance=5)
+
+# Toppens egenskaper
+peak_positions = angles[peaks]
+peak_heights = intensity_smoothed[peaks]
+peak_prominences = properties['prominences']
+peak_widths = properties.get('widths', np.zeros_like(peaks))
+
+# Visualisera identifierade toppar
+plt.figure(figsize=(10, 6))
+plt.plot(angles, intensity_smoothed, label="Filtrerad Intensitet")
+plt.plot(peak_positions, peak_heights, "x", label="Identifierade Toppar", color='red')
+plt.xlabel("Vinkel (grader)")
+plt.ylabel("Intensitet")
+plt.title("Identifierade Intensitetstoppar i Filtrerad Data")
+plt.legend()
+plt.show()
+
+# Logga toppens egenskaper
+print("Toppens Positioner (Vinklar):", peak_positions)
+print("Toppens Intensiteter:", peak_heights)
+print("Toppens Prominence (Tydlighet):", peak_prominences)
+print("Toppens Bredd (FWHM):", peak_widths)
+
+# Standardisering av data
+scaler = StandardScaler()
+angles_scaled = scaler.fit_transform(angles.reshape(-1, 1))
+
+# PCA och KernelPCA för att minska dimensionalitet 
+pca = PCA(n_components=2)
+kpca = KernelPCA(kernel='rbf', n_components=2, fit_inverse_transform=True)
+angles_pca = pca.fit_transform(np.column_stack((angles_scaled, intensity_smoothed.reshape(-1, 1))))
+angles_kpca = kpca.fit_transform(np.column_stack((angles_scaled, intensity_smoothed.reshape(-1, 1))))
+
+# Visualisera PCA och KernelPCA analysen
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
+scatter1 = ax1.scatter(angles_pca[:, 0], angles_pca[:, 1], c=angles, cmap='viridis', marker='x')
+ax1.set_xlabel("Principal Component 1")
+ax1.set_ylabel("Principal Component 2")
+ax1.set_title("PCA of Neutron Scattering Data")
+
+scatter2 = ax2.scatter(angles_kpca[:, 0], angles_kpca[:, 1], c=angles, cmap='viridis', marker='x')
+ax2.set_xlabel("Kernel Principal Component 1")
+ax2.set_ylabel("Kernel Principal Component 2")
+ax2.set_title("Kernel PCA of Neutron Scattering Data")
+
+for ax, scatter in [(ax1, scatter1), (ax2, scatter2)]:
+    cbar = plt.colorbar(scatter, ax=ax)
+    cbar.set_label('Angle (degrees)')
+plt.tight_layout()
+plt.show()
+
+# Dela upp data i träning och test
+X_train, X_test, y_train, y_test = train_test_split(angles_scaled, intensity_smoothed, test_size=0.2, random_state=42)
+
+# Förbättrad polynomiell regression med fler modeller
+degree_range = [1, 2, 3, 4, 5]
+models = {
+    'ElasticNet': ElasticNet(max_iter=10000),
+    'GradientBoosting': GradientBoostingRegressor(),
+    'RandomForest': RandomForestRegressor(),
+    'MLP': MLPRegressor(hidden_layer_sizes=(50, 50), max_iter=1000),
+    'SVR': SVR(kernel='rbf'),
+    'GaussianProcess': GaussianProcessRegressor(kernel=C(1.0, (1e-3, 1e3)) * RBF(10, (1e-2, 1e2)), n_restarts_optimizer=9),
+}
+
+results = {}
+
+for name, model in models.items():
+    poly = PolynomialFeatures(degree=4, include_bias=False)
+    scaler_model = StandardScaler()
+    
+    pipeline = make_pipeline(poly, scaler_model, model)
+    
+    param_grid = {}
+    if name == 'ElasticNet':
+        param_grid = {'elasticnet__alpha': np.logspace(-3, 3, 7), 'elasticnet__l1_ratio': [0.1, 0.5, 0.9, 1.0]}
+    elif name == 'GradientBoosting':
+        param_grid = {'gradientboostingregressor__n_estimators': [50, 100, 200], 'gradientboostingregressor__learning_rate': [0.01, 0.1, 0.2]}
+    elif name == 'RandomForest':
+        param_grid = {'randomforestregressor__n_estimators': [50, 100, 200], 'randomforestregressor__max_depth': [5, 10, 20, None]}
+    
+    if param_grid:
+        grid_search = RandomizedSearchCV(pipeline, param_grid, cv=5, scoring='neg_mean_squared_error', n_iter=50, random_state=42)
+        grid_search.fit(X_train, y_train)
+        best_model = grid_search.best_estimator_
+    else:
+        best_model = pipeline.fit(X_train, y_train)
+    
+    y_pred = best_model.predict(X_test)
+    r2 = r2_score(y_test, y_pred)
+    mse = mean_squared_error(y_test, y_pred)
+    mae = mean_absolute_error(y_test, y_pred)
+    
+    results[name] = {'r2': r2, 'mse': mse, 'mae': mae, 'model': best_model}
+
+# Visualisera resultat
+for name, res in results.items():
+    y_pred = res['model'].predict(angles_scaled)
+    plt.figure(figsize=(10, 6))
+    plt.plot(angles, intensity_smoothed, label="True Intensity")
+    plt.plot(angles, y_pred, label=f"Predicted by {name}")
+    plt.xlabel("Angle (degrees)")
+    plt.ylabel("Intensity")
+    plt.title(f"{name} Regression Results")
+    plt.legend()
+    plt.show()
+
+# Sammanfatta resultat i en tabell
+df_results = pd.DataFrame(results).T[['r2', 'mse', 'mae']]
+print(df_results)
+
+# Visualisera r2-score för modellerna med seaborn
+plt.figure(figsize=(10, 6))
+sns.barplot(x=df_results.index, y='r2', data=df_results)
+plt.title("R² Score Comparison")
+plt.ylabel("R² Score")
+plt.xlabel("Model")
+plt.show()
