@@ -1,0 +1,141 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import PolynomialFeatures, StandardScaler
+from sklearn.linear_model import ElasticNet
+from sklearn.decomposition import PCA
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from scipy.signal import find_peaks
+from sklearn.model_selection import RandomizedSearchCV
+from sklearn.ensemble import GradientBoostingRegressor
+
+# Simulera neutron-spridningsdata med realistiskt brus
+np.random.seed(0)
+angles = np.linspace(0, 180, 100)
+intensity = np.sin(np.radians(angles)) + 0.05 * np.random.normal(size=angles.size)
+
+# Visualisera den simulerade datan
+plt.plot(angles, intensity, label="Simulerad Intensitet")
+plt.xlabel("Vinkel (grader)")
+plt.ylabel("Intensitet")
+plt.title("Simulerad Neutron-Spridningsdata")
+plt.legend()
+plt.show()
+
+# Identifiera toppar med justerade parametrar för bättre detektion
+peaks, properties = find_peaks(intensity, height=0.005, prominence=0.005, distance=2)
+
+# Toppens egenskaper: position (vinkel), höjd (intensitet), bredd (FWHM)
+peak_positions = angles[peaks]  # Vinklar för varje topp
+peak_heights = intensity[peaks]  # Intensiteter för varje topp
+peak_prominences = properties['prominences']  # Toppens tydlighet (prominence)
+peak_widths = properties.get('widths', np.zeros_like(peaks))  # Bredden på varje topp (FWHM), om tillgänglig
+
+# Visualisera identifierade toppar
+plt.figure(figsize=(10, 6))
+plt.plot(angles, intensity, label="Simulerad Intensitet")
+plt.plot(peak_positions, peak_heights, "x", label="Identifierade Toppar", color='orange')
+plt.xlabel("Vinkel (grader)")
+plt.ylabel("Intensitet")
+plt.title("Identifierade Intensitetstoppar i Neutron-Spridningsdata")
+plt.legend()
+plt.show()
+
+# Logga toppens egenskaper för analys
+print("Toppens Positioner (Vinklar):", peak_positions)
+print("Toppens Intensiteter:", peak_heights)
+print("Toppens Prominence (Tydlighet):", peak_prominences)
+print("Toppens Bredd (FWHM):", peak_widths)
+
+# Standardisering av data
+scaler = StandardScaler()
+angles_scaled = scaler.fit_transform(angles.reshape(-1, 1))
+
+# PCA för att minska dimensionalitet 
+pca = PCA(n_components=2)
+# Vi använder inte PCA för att transformera data innan regression, endast för visualisering
+angles_pca = pca.fit_transform(np.column_stack((angles_scaled, intensity.reshape(-1, 1))))
+
+# Visualisera PCA analysen
+plt.figure(figsize=(10, 6))
+scatter = plt.scatter(angles_pca[:, 0], angles_pca[:, 1], c=angles, cmap='viridis', marker='x')
+plt.xlabel("Principal Component 1")
+plt.ylabel("Principal Component 2")
+plt.title("PCA of Neutron Scattering Data")
+cbar = plt.colorbar(scatter)
+cbar.set_label('Angle (degrees)')
+plt.show()
+
+# Förbättrad polynomiell regression
+degree_range = [1, 2, 3, 4, 5]
+best_poly_degree = None
+best_r2 = -np.inf
+
+# Använd en gemensam poly och scaler för alla grader
+poly = PolynomialFeatures(degree=4, include_bias=False)  # Nu med degree=4 för att generera minst 5 funktioner
+scaler_model = StandardScaler()
+
+for degree in degree_range:
+    angles_poly = poly.fit_transform(angles_scaled)
+    angles_poly = angles_poly[:, :5]  # Välj endast de första 5 kolumnerna för att ha 5 funktioner
+    angles_poly_scaled = scaler_model.fit_transform(angles_poly)
+    
+    model = ElasticNet(max_iter=10000)
+    param_grid = {
+        'alpha': np.logspace(-3, 3, 7),
+        'l1_ratio': [0.1, 0.5, 0.9, 1.0]
+    }
+    grid_search = RandomizedSearchCV(model, param_grid, cv=5, scoring='neg_mean_squared_error', n_iter=50, random_state=42)
+    grid_search.fit(angles_poly_scaled, intensity)
+
+    intensity_pred = grid_search.best_estimator_.predict(angles_poly_scaled)
+    r2 = r2_score(intensity, intensity_pred)
+    
+    if r2 > best_r2:
+        best_r2 = r2
+        best_poly_degree = degree
+
+print(f"Bästa polynomgrad: {best_poly_degree}")
+
+# Använd den bästa modellen för att göra förutsägelser
+angles_poly = poly.fit_transform(angles_scaled)  # För träningsdata
+angles_poly = angles_poly[:, :5]  # Välj endast de första 5 kolumnerna
+angles_poly_scaled = scaler_model.fit_transform(angles_poly)  # Fit scaler på träningsdata
+
+# För att förutsäga framtida värden, skapa en array med nya vinklar
+future_angles = np.linspace(180, 360, 100).reshape(-1, 1)
+future_angles_scaled = scaler.transform(future_angles)  # Använd transform, inte fit_transform
+future_angles_poly = poly.transform(future_angles_scaled)  # Använd transform, inte fit_transform
+future_angles_poly = future_angles_poly[:, :5]  # Välj endast de första 5 kolumnerna
+future_angles_poly_scaled = scaler_model.transform(future_angles_poly)
+
+# Gör prediktioner för framtida vinklar
+intensity_pred = grid_search.best_estimator_.predict(angles_poly_scaled)
+future_intensity_pred = grid_search.best_estimator_.predict(future_angles_poly_scaled)
+
+# Visualisera resultat av polynomiell regression inklusive framtida förutsägelser
+plt.figure(figsize=(10, 6))
+plt.plot(angles, intensity, label="Original Intensitet")
+plt.plot(angles, intensity_pred, label="Förutsagd Intensitet (ElasticNet)")
+plt.plot(future_angles, future_intensity_pred, '--', label="Förutsagd Framtida Intensitet")
+plt.xlabel("Vinkel (grader)")
+plt.ylabel("Intensitet")
+plt.title("ElasticNet Regression med Framtida Förutsägelser")
+plt.legend()
+plt.show()
+
+# 1. scikit-learn för Avancerad Maskininlärning: Gradient Boosting
+gb_model = make_pipeline(PolynomialFeatures(degree=4, include_bias=False), StandardScaler(), GradientBoostingRegressor())
+gb_model.fit(angles_scaled, intensity)
+intensity_pred_gb = gb_model.predict(angles_scaled)
+future_intensity_pred_gb = gb_model.predict(future_angles_scaled)
+
+plt.figure(figsize=(10, 6))
+plt.plot(angles, intensity, label="Original Intensitet")
+plt.plot(angles, intensity_pred_gb, label="Förutsagd Intensitet (Gradient Boosting)")
+plt.plot(future_angles, future_intensity_pred_gb, '--', label="Förutsagd Framtida Intensitet (GB)")
+plt.xlabel("Vinkel (grader)")
+plt.ylabel("Intensitet")
+plt.title("Gradient Boosting Regression med Framtida Förutsägelser")
+plt.legend()
+plt.show()
