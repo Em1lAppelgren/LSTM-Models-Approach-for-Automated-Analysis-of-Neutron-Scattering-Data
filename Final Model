@@ -222,45 +222,70 @@ notebook = ttk.Notebook(root)
 
 # Skapa data för graferna
 x1 = angles
+
 y1 = intensity
+
 y2 = intensity_smoothed
+
 x2 = peak_positions
+
 y3 = peak_heights
 
 # Skapa tabbar
 tab1 = ttk.Frame(notebook)
+
 tab2 = ttk.Frame(notebook)
+
 tab3 = ttk.Frame(notebook)
+
 tab4 = ttk.Frame(notebook)
+
 tab5 = ttk.Frame(notebook)
 
 # Lägg till tabbarna i Notebook
 notebook.add(tab1, text="Simulerat")
+
 notebook.add(tab2, text="Peak")
+
 notebook.add(tab3, text="Scatter-diagram")
 
 notebook.pack(expand=True, fill="both")
 
 create_plot_1( 
     tab2,
+
     title="Identifierade Intensitetstoppar i Neutron-Spridningsdata",
+
     x=x1,
+
     y=y1,  # Bytt från y2 till y1 för att visa original intensitet
+
     x_marks=x2,
+
     y_marks=y3, 
+
     line_label= "Original Intensitet",
+
     mark_label= "Identifierade Toppar"
     )
 
 create_plot_2(
     tab1, 
+
     title="Simulerad Neutron-Spridningsdata med Filtering", 
+
     xlabel="Vinkel (grader)", 
+
     ylabel="Intensitet", 
+
     line1_label="Original Intensitet", 
+
     line2_label= "Filtrerad Intensitet",
+
     x=x1, 
+
     y1=y1,
+
     y2=y2
     )
 
