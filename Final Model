@@ -5,7 +5,7 @@ from sklearn.preprocessing import PolynomialFeatures, StandardScaler
 from sklearn.linear_model import ElasticNet
 from sklearn.decomposition import PCA, KernelPCA
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from scipy.signal import find_peaks, savgol_filter
+from scipy.signal import find_peaks, savgol_filter, periodogram
 from sklearn.model_selection import RandomizedSearchCV, train_test_split
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 from sklearn.neural_network import MLPRegressor
@@ -19,6 +19,8 @@ from tkinter import ttk
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.ticker import FuncFormatter
+from scipy import fftpack
+from matplotlib.colors import LinearSegmentedColormap
 
 # Simulera neutron-spridningsdata med realistiskt brus och högre komplexitet
 np.random.seed(0)
@@ -106,7 +108,7 @@ def create_plot_1(frame, title, x, y, x_marks, y_marks, line_label, mark_label):
     ax = fig.add_subplot(111)
     
     ax.plot(x, y, label=line_label, color="blue")
-    ax.plot(x_marks, y_marks, 'x', color='red', markersize=10, label= mark_label)
+    ax.plot(x_marks, y_marks, 'x', color='red', markersize=10, label=mark_label)
     
     ax.set_title(title)
     ax.legend()
@@ -125,8 +127,8 @@ def create_plot_2(frame, title, xlabel, ylabel, x, y1, y2, line1_label, line2_la
     fig = Figure(figsize=(5, 4), dpi=100)
     ax = fig.add_subplot(111)
     
-    ax.plot(x, y1, label= line1_label, color="blue", marker='')
-    ax.plot(x, y2, label= line2_label, color="red", marker='')
+    ax.plot(x, y1, label=line1_label, color="blue", marker='')
+    ax.plot(x, y2, label=line2_label, color="red", marker='')
     
     ax.set_title(title)
     ax.set_xlabel(xlabel)
@@ -212,6 +214,73 @@ def create_plot_5(tab, df_results, title):
     toolbar = NavigationToolbar2Tk(canvas, toolbar_frame)
     toolbar.update()
 
+def create_plot_spectrum(frame, title, xlabel, ylabel, x, y):
+    fig = Figure(figsize=(5, 4), dpi=100)
+    ax = fig.add_subplot(111)
+    
+    ax.plot(x, y)
+    ax.set_title(title)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.grid(True)
+    
+    canvas = FigureCanvasTkAgg(fig, master=frame)
+    canvas.draw()
+    canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    toolbar_frame = tk.Frame(frame)
+    toolbar_frame.pack(fill=tk.X)
+    toolbar = NavigationToolbar2Tk(canvas, toolbar_frame)
+    toolbar.update()
+
+def create_plot_colored_spectrum(frame, title, xlabel, ylabel, x, y):
+    fig = Figure(figsize=(10, 6), dpi=100)
+    ax = fig.add_subplot(111)
+    
+    # Skapa en färgkarta som liknar ett ljusspektrum
+    colors = [(0.6, 0, 0), (0, 0, 1), (0, 1, 0), (1, 1, 0), (1, 0.4, 0), (0.8, 0, 0)]  # RGB values for ROYGBIV
+    n_bins = 100
+    cmap_name = 'my_spectrum'
+    cm = LinearSegmentedColormap.from_list(cmap_name, colors, N=n_bins)
+
+    # Normalisera y-värden för att använda som index i colormap
+    y_norm = (y - min(y)) / (max(y) - min(y))
+
+    # Plotta spektrum med färger baserat på amplitud
+    for i in range(len(x)):
+        ax.plot(x[i], y[i], 'o', color=cm(y_norm[i]), markersize=4)
+
+    ax.set_xlim(0, max(x))  # Justera x-axis för att visa hela spektrumet
+    ax.set_ylim(0, max(y)*1.1)  # Lite extra utrymme ovanför högsta amplituden
+    
+    ax.set_title(title)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.grid(True)
+    
+    # Lägg till en färgbar
+    sm = plt.cm.ScalarMappable(cmap=cm, norm=plt.Normalize(vmin=min(y), vmax=max(y)))
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=ax, orientation='vertical')
+    cbar.set_label('Amplitud')
+
+    canvas = FigureCanvasTkAgg(fig, master=frame)
+    canvas.draw()
+    canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    toolbar_frame = tk.Frame(frame)
+    toolbar_frame.pack(fill=tk.X)
+    toolbar = NavigationToolbar2Tk(canvas, toolbar_frame)
+    toolbar.update()
+
+# Utför Fourier-transform för spektralanalys
+fft_intensity = fftpack.fft(intensity)
+frequencies = fftpack.fftfreq(len(intensity), d=(angles[1]-angles[0])*np.pi/180)  # d is the sample spacing in radians
+
+# Välj bara positiva frekvenser
+pos_freq = frequencies[:len(frequencies)//2]
+pos_fft = np.abs(fft_intensity[:len(frequencies)//2])
+
 # Skapa huvudfönstret
 root = tk.Tk()
 root.title("SANS Analys")
@@ -222,72 +291,50 @@ notebook = ttk.Notebook(root)
 
 # Skapa data för graferna
 x1 = angles
-
 y1 = intensity
-
 y2 = intensity_smoothed
-
 x2 = peak_positions
-
 y3 = peak_heights
 
 # Skapa tabbar
 tab1 = ttk.Frame(notebook)
-
 tab2 = ttk.Frame(notebook)
-
 tab3 = ttk.Frame(notebook)
-
 tab4 = ttk.Frame(notebook)
-
 tab5 = ttk.Frame(notebook)
+tab_spectrum = ttk.Frame(notebook)  # Ny flik för spektralanalys
+tab_colored_spectrum = ttk.Frame(notebook)  # Ny flik för spektralanalys med färger
 
 # Lägg till tabbarna i Notebook
 notebook.add(tab1, text="Simulerat")
-
 notebook.add(tab2, text="Peak")
-
 notebook.add(tab3, text="Scatter-diagram")
-
+notebook.add(tab_spectrum, text="Spektralanalys")
+notebook.add(tab_colored_spectrum, text="Spektralfärger")
 notebook.pack(expand=True, fill="both")
 
-create_plot_1( 
+create_plot_1(
     tab2,
-
     title="Identifierade Intensitetstoppar i Neutron-Spridningsdata",
-
     x=x1,
-
     y=y1,  # Bytt från y2 till y1 för att visa original intensitet
-
     x_marks=x2,
-
     y_marks=y3, 
-
-    line_label= "Original Intensitet",
-
-    mark_label= "Identifierade Toppar"
-    )
+    line_label="Original Intensitet",
+    mark_label="Identifierade Toppar"
+)
 
 create_plot_2(
     tab1, 
-
     title="Simulerad Neutron-Spridningsdata med Filtering", 
-
     xlabel="Vinkel (grader)", 
-
     ylabel="Intensitet", 
-
     line1_label="Original Intensitet", 
-
-    line2_label= "Filtrerad Intensitet",
-
+    line2_label="Filtrerad Intensitet",
     x=x1, 
-
     y1=y1,
-
     y2=y2
-    )
+)
 
 create_plot_3(tab3)
 
@@ -297,8 +344,27 @@ for name, res in results.items():
     create_plot_4(regression_tab, name, angles, intensity_smoothed, angles_scaled)
 
 notebook.add(tab5, text="R² Score Comparison")
-
 create_plot_5(tab5, df_results, "R² Score Comparison")
+
+# Spektralanalys flik utan färger
+create_plot_spectrum(
+    tab_spectrum,
+    title="Spektralanalys av Neutron-Spridningsdata",
+    xlabel="Frekvens (rad/s)",
+    ylabel="Amplitud",
+    x=pos_freq,
+    y=pos_fft
+)
+
+# Spektralanalys flik med färger
+create_plot_colored_spectrum(
+    tab_colored_spectrum,
+    title="Spektralanalys med Spektralfärger",
+    xlabel="Frekvens (rad/s)",
+    ylabel="Amplitud",
+    x=pos_freq,
+    y=pos_fft
+)
 
 # Starta huvudloopen
 root.mainloop()
