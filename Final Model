@@ -195,15 +195,33 @@ def create_plot_4(tab, model_name, angles, intensity_smoothed, angles_scaled):
     toolbar.update()
 
 def create_plot_5(tab, df_results, title):
-    fig = Figure(figsize=(10, 6), dpi=100)
+    fig = Figure(figsize=(12, 6), dpi=100)  # Ökar storleken på figuren
     ax = fig.add_subplot(111)
 
-    sns.barplot(x=df_results.index, y='r2', data=df_results, ax=ax)
-    ax.set_title(title)
-    ax.set_ylabel("R² Score")
-    ax.set_xlabel("Model")
+    # Sortera data efter R² score
+    df_results = df_results.sort_values('r2', ascending=False)
 
+    # Skapa en palett med distinkta färger
+    palette = sns.color_palette("husl", len(df_results))
+
+    # Plotta med färgad barplot och minskar tjockleken på pelarna
+    bars = sns.barplot(x=df_results.index, y='r2', data=df_results, ax=ax, palette=palette, width=0.5)  # Justerade 'width' till 0.5
+    
+    # Lägg till värden ovanpå staplarna
+    for bar in bars.patches:
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height,
+                f'{height:.2%}',
+                ha='center', va='bottom', rotation=0, fontsize=10)
+
+    ax.set_title(title, fontsize=16)
+    ax.set_ylabel("R² Score", fontsize=14)
+    ax.set_xlabel("Model", fontsize=14)
     ax.yaxis.set_major_formatter(FuncFormatter(lambda y, _: f'{y * 100:.0f}%'))
+    
+    # Förbättra layout
+    ax.tick_params(axis='both', which='major', labelsize=12)
+    plt.tight_layout()
 
     canvas = FigureCanvasTkAgg(fig, master=tab)
     canvas.draw()
